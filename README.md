@@ -4,6 +4,8 @@ Live-test version for Relay Logistics load profitability.
 
 ## What this includes
 
+Update: summary metric cards now appear below the originating and return load sections.
+
 - Company driver vs owner-operator logic
 - Originating load and return load
 - Owner-operator diesel rule: owner-op always pays diesel
