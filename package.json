@@ -1,28 +1,149 @@
-{
-  "name": "relay-load-calculator",
-  "version": "0.1.0",
-  "private": true,
-  "scripts": {
-    "dev": "next dev",
-    "build": "next build",
-    "start": "next start",
-    "lint": "next lint"
-  },
-  "dependencies": {
-    "@supabase/supabase-js": "^2.48.1",
-    "next": "^15.1.6",
-    "react": "^19.0.0",
-    "react-dom": "^19.0.0",
-    "lucide-react": "^0.468.0"
-  },
-  "devDependencies": {
-    "@types/node": "^22.10.6",
-    "@types/react": "^19.0.7",
-    "@types/react-dom": "^19.0.3",
-    "eslint": "^9.18.0",
-    "eslint-config-next": "^15.1.6",
-    "postcss": "^8.4.49",
-    "tailwindcss": "^3.4.17",
-    "typescript": "^5.7.3"
+import { NextResponse } from "next/server";
+// eslint-disable-next-line @typescript-eslint/no-var-requires
+const pdfParse = require("pdf-parse");
+
+type ParsedRateCon = {
+  loadNumber?: string;
+  broker?: string;
+  rate?: number;
+  equipmentType?: string;
+  pickupAddress?: string;
+  finalDeliveryAddress?: string;
+  deliveryStops?: string[];
+  rawTextPreview?: string;
+  warnings: string[];
+};
+
+function cleanMoney(value: string | null | undefined): number | undefined {
+  if (!value) return undefined;
+  const n = Number(value.replace(/[$,]/g, ""));
+  return Number.isFinite(n) ? n : undefined;
+}
+
+function firstMatch(text: string, patterns: RegExp[]): string | undefined {
+  for (const pattern of patterns) {
+    const match = text.match(pattern);
+    if (match?.[1]) return match[1].trim();
+  }
+  return undefined;
+}
+
+function parseRate(text: string): number | undefined {
+  const patterns = [
+    /Net\s+Freight\s+Charges\s+(?:USD\s*)?\$?\s*([\d,]+(?:\.\d{2})?)/i,
+    /Total\s+Cost\s+(?:USD\s*)?\$?\s*([\d,]+(?:\.\d{2})?)/i,
+    /Total\s+Carrier\s+Pay\s*:?\s*\$?\s*([\d,]+(?:\.\d{2})?)/i,
+    /Carrier\s+Pay\s*:?\s*\$?\s*([\d,]+(?:\.\d{2})?)/i,
+    /Line\s+Haul\s*:?\s*\$?\s*([\d,]+(?:\.\d{2})?)/i,
+    /Rate\s*:?\s*\$?\s*([\d,]+(?:\.\d{2})?)/i
+  ];
+
+  for (const pattern of patterns) {
+    const match = text.match(pattern);
+    const rate = cleanMoney(match?.[1]);
+    if (rate && rate > 0) return rate;
+  }
+
+  return undefined;
+}
+
+function parseStops(text: string) {
+  const lines = text
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter(Boolean);
+
+  const pickupIndex = lines.findIndex((line) => /Shipper\s+Pickup|Pickup\s*\(Stop|Pick\s*Up/i.test(line));
+  const consigneeIndexes = lines
+    .map((line, i) => (/Consignee\s+Delivery|Delivery\s*\(Stop/i.test(line) ? i : -1))
+    .filter((i) => i >= 0);
+
+  function addressFromIndex(index: number): string | undefined {
+    if (index < 0) return undefined;
+    const chunk = lines.slice(index, index + 12);
+    const addressLines = chunk.filter((line) => {
+      return (
+        /\d{2,}.*\b(road|rd|street|st|avenue|ave|pike|drive|dr|road|suite|center|blvd|lane|ln|way)\b/i.test(line) ||
+        /\b[A-Z][A-Z\s]+,\s*[A-Z]{2}\s*(?:US\s*)?\d{5}/i.test(line) ||
+        /\b[A-Z]{2}\s+US\s+\d{5}/i.test(line)
+      );
+    });
+
+    return addressLines.slice(0, 3).join(", ") || undefined;
+  }
+
+  const pickupAddress = addressFromIndex(pickupIndex);
+  const deliveryStops = consigneeIndexes.map(addressFromIndex).filter(Boolean) as string[];
+  const finalDeliveryAddress = deliveryStops.length ? deliveryStops[deliveryStops.length - 1] : undefined;
+
+  return { pickupAddress, deliveryStops, finalDeliveryAddress };
+}
+
+function parseRateCon(text: string): ParsedRateCon {
+  const warnings: string[] = [];
+  const normalized = text.replace(/\u00a0/g, " ");
+
+  const loadNumber = firstMatch(normalized, [
+    /Load\s+Number\s*:?\s*([A-Z0-9-]+)/i,
+    /Load\s*#\s*:?\s*([A-Z0-9-]+)/i,
+    /Carrier\s+Rate\s+Confirmation\s*:?\s*([A-Z0-9-]+)/i
+  ]);
+
+  const broker = firstMatch(normalized, [
+    /Broker\s+Contact\s+Information\s*\n\s*([^\n]+)/i,
+    /^([A-Z][A-Za-z0-9 &.,'-]+)\s*\n\s*(?:PO Box|P\.O\. Box|\d{2,})/m
+  ]);
+
+  const equipmentType = firstMatch(normalized, [
+    /Equipment\s+Type\s*:?\s*([^\n]+)/i,
+    /Equipment\s*:?\s*([^\n]+)/i
+  ]);
+
+  const rate = parseRate(normalized);
+  if (!rate) warnings.push("Could not confidently find the rate. Check the actual rate manually.");
+
+  const stops = parseStops(normalized);
+  if (!stops.pickupAddress) warnings.push("Could not confidently find pickup address.");
+  if (!stops.finalDeliveryAddress) warnings.push("Could not confidently find final delivery address.");
+
+  return {
+    loadNumber,
+    broker,
+    rate,
+    equipmentType,
+    ...stops,
+    rawTextPreview: normalized.slice(0, 2500),
+    warnings
+  };
+}
+
+export async function POST(request: Request) {
+  try {
+    const formData = await request.formData();
+    const file = formData.get("file");
+
+    if (!(file instanceof File)) {
+      return NextResponse.json({ error: "No file uploaded." }, { status: 400 });
+    }
+
+    if (!file.name.toLowerCase().endsWith(".pdf")) {
+      return NextResponse.json({
+        error: "V1 parser only supports text-based PDFs. Image/JPG parsing needs OCR in the next step."
+      }, { status: 400 });
+    }
+
+    const bytes = await file.arrayBuffer();
+    const buffer = Buffer.from(bytes);
+    const parsed = await pdfParse(buffer);
+
+    if (!parsed.text || parsed.text.trim().length < 20) {
+      return NextResponse.json({
+        error: "This PDF did not contain readable text. It may be scanned. OCR will be needed."
+      }, { status: 400 });
+    }
+
+    return NextResponse.json({ parsed: parseRateCon(parsed.text) });
+  } catch (error) {
+    return NextResponse.json({ error: "Could not parse rate confirmation." }, { status: 500 });
   }
 }
