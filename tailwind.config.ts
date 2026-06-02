@@ -1,15 +1,14 @@
-import { createClient } from "@supabase/supabase-js";
+import type { Config } from "tailwindcss";
 
-export function getSupabaseBrowserClient() {
-  const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
-  const anon = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
-  if (!url || !anon) throw new Error("Missing Supabase public environment variables.");
-  return createClient(url, anon);
-}
+const config: Config = {
+  content: [
+    "./app/**/*.{js,ts,jsx,tsx,mdx}",
+    "./components/**/*.{js,ts,jsx,tsx,mdx}"
+  ],
+  theme: {
+    extend: {},
+  },
+  plugins: [],
+};
 
-export function getSupabaseServiceClient() {
-  const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
-  const service = process.env.SUPABASE_SERVICE_ROLE_KEY;
-  if (!url || !service) throw new Error("Missing Supabase service environment variables.");
-  return createClient(url, service);
-}
+export default config;
