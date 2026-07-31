@@ -25,6 +25,7 @@ export type LoadInputs = {
   originDeliveryLocations: string[];
   originRouteStopCount: number;
   originRouteStops: string[];
+  originRouteStopsText: string;
 
   returnDriverLocation: string;
   returnPickupLocation: string;
@@ -35,6 +36,7 @@ export type LoadInputs = {
   returnDeliveryLocations: string[];
   returnRouteStopCount: number;
   returnRouteStops: string[];
+  returnRouteStopsText: string;
 
   originActualRate: number;
   originDriverRate: number;
