@@ -111,6 +111,7 @@ const baseDefaults: LoadInputs = {
   originDeliveryLocations: [""],
   originRouteStopCount: 2,
   originRouteStops: ["", ""],
+  originRouteStopsText: "",
 
   returnDriverLocation: "",
   returnPickupLocation: "",
@@ -121,6 +122,7 @@ const baseDefaults: LoadInputs = {
   returnDeliveryLocations: [""],
   returnRouteStopCount: 2,
   returnRouteStops: ["", ""],
+  returnRouteStopsText: "",
 
   originActualRate: 0,
   originDriverRate: 0,
@@ -243,6 +245,43 @@ export default function Home() {
     setActiveInput((prev) => ({ ...prev, [key]: value }));
   }
 
+  function splitRouteStopsText(value: string) {
+    return value
+      .split(/\r?\n/)
+      .map((line) => line.trim())
+      .filter(Boolean);
+  }
+
+  function setRouteStopsText(kind: "origin" | "return", value: string) {
+    const stops = splitRouteStopsText(value);
+
+    setActiveInput((prev) => {
+      if (kind === "origin") {
+        return {
+          ...prev,
+          originRouteStopsText: value,
+          originRouteStopCount: Math.max(stops.length, 2),
+          originRouteStops: stops.length ? stops : ["", ""],
+          originPickupLocation: stops[0] || "",
+          originDeliveryLocation: stops[stops.length - 1] || "",
+          originPickupLocations: stops.slice(0, 1),
+          originDeliveryLocations: stops.slice(1),
+        };
+      }
+
+      return {
+        ...prev,
+        returnRouteStopsText: value,
+        returnRouteStopCount: Math.max(stops.length, 2),
+        returnRouteStops: stops.length ? stops : ["", ""],
+        returnPickupLocation: stops[0] || "",
+        returnDeliveryLocation: stops[stops.length - 1] || "",
+        returnPickupLocations: stops.slice(0, 1),
+        returnDeliveryLocations: stops.slice(1),
+      };
+    });
+  }
+
   function setReturnLoadEnabled(enabled: boolean) {
     setActiveInput((prev) => {
       if (enabled) {
@@ -264,6 +303,7 @@ export default function Home() {
         returnDeliveryLocations: [""],
         returnRouteStopCount: 2,
         returnRouteStops: ["", ""],
+        returnRouteStopsText: "",
         returnActualRate: 0,
         returnDriverRate: 0,
         returnLoadedMiles: 0,
@@ -498,16 +538,16 @@ export default function Home() {
       driver_type: input.driverType,
 
       origin_driver_location: input.originDriverLocation,
-      origin_pickup_location: (input.originRouteStops || [])[0] || input.originPickupLocation,
-      origin_delivery_location: (input.originRouteStops || [])[Math.max((input.originRouteStops || []).length - 1, 0)] || input.originDeliveryLocation,
-      origin_pickup_locations: (input.originRouteStops || []).slice(0, 1),
-      origin_delivery_locations: (input.originRouteStops || []).slice(1),
+      origin_pickup_location: (splitRouteStopsText(input.originRouteStopsText || "")[0] || (input.originRouteStops || [])[0] || input.originPickupLocation),
+      origin_delivery_location: (splitRouteStopsText(input.originRouteStopsText || "").slice(-1)[0] || (input.originRouteStops || []).slice(-1)[0] || input.originDeliveryLocation),
+      origin_pickup_locations: (splitRouteStopsText(input.originRouteStopsText || "").length ? splitRouteStopsText(input.originRouteStopsText || "").slice(0, 1) : (input.originRouteStops || []).slice(0, 1)),
+      origin_delivery_locations: (splitRouteStopsText(input.originRouteStopsText || "").length ? splitRouteStopsText(input.originRouteStopsText || "").slice(1) : (input.originRouteStops || []).slice(1)),
 
       return_driver_location: input.returnDriverLocation,
-      return_pickup_location: (input.returnRouteStops || [])[0] || input.returnPickupLocation,
-      return_delivery_location: (input.returnRouteStops || [])[Math.max((input.returnRouteStops || []).length - 1, 0)] || input.returnDeliveryLocation,
-      return_pickup_locations: (input.returnRouteStops || []).slice(0, 1),
-      return_delivery_locations: (input.returnRouteStops || []).slice(1),
+      return_pickup_location: (splitRouteStopsText(input.returnRouteStopsText || "")[0] || (input.returnRouteStops || [])[0] || input.returnPickupLocation),
+      return_delivery_location: (splitRouteStopsText(input.returnRouteStopsText || "").slice(-1)[0] || (input.returnRouteStops || []).slice(-1)[0] || input.returnDeliveryLocation),
+      return_pickup_locations: (splitRouteStopsText(input.returnRouteStopsText || "").length ? splitRouteStopsText(input.returnRouteStopsText || "").slice(0, 1) : (input.returnRouteStops || []).slice(0, 1)),
+      return_delivery_locations: (splitRouteStopsText(input.returnRouteStopsText || "").length ? splitRouteStopsText(input.returnRouteStopsText || "").slice(1) : (input.returnRouteStops || []).slice(1)),
 
       origin_actual_rate: input.originActualRate,
       origin_driver_rate: input.originDriverRate,
@@ -586,8 +626,11 @@ export default function Home() {
   async function calculateMiles(kind: "origin" | "return") {
     const input = activeInput;
     const driverLocation = kind === "origin" ? input.originDriverLocation : input.returnDriverLocation;
-    const stops = kind === "origin" ? input.originRouteStops : input.returnRouteStops;
-    const cleanStops = (stops || []).map((x) => x.trim()).filter(Boolean);
+    const stopsText = kind === "origin" ? input.originRouteStopsText : input.returnRouteStopsText;
+    const fallbackStops = kind === "origin" ? input.originRouteStops : input.returnRouteStops;
+    const cleanStops = splitRouteStopsText(stopsText || "").length
+      ? splitRouteStopsText(stopsText || "")
+      : (fallbackStops || []).map((x) => x.trim()).filter(Boolean);
 
     if (!driverLocation || cleanStops.length < 2) {
       setStatus(`Enter current location and at least two ordered stops for ${kind} load first.`);
@@ -621,8 +664,11 @@ export default function Home() {
 
   async function calculateTolls(kind: "origin" | "return") {
     const input = activeInput;
-    const stops = kind === "origin" ? input.originRouteStops : input.returnRouteStops;
-    const cleanStops = (stops || []).map((x) => x.trim()).filter(Boolean);
+    const stopsText = kind === "origin" ? input.originRouteStopsText : input.returnRouteStopsText;
+    const fallbackStops = kind === "origin" ? input.originRouteStops : input.returnRouteStops;
+    const cleanStops = splitRouteStopsText(stopsText || "").length
+      ? splitRouteStopsText(stopsText || "")
+      : (fallbackStops || []).map((x) => x.trim()).filter(Boolean);
 
     if (cleanStops.length < 2) {
       setStatus(`Enter at least two ordered stops for ${kind} tolls first.`);
@@ -879,7 +925,7 @@ export default function Home() {
   return (
     <main className="mx-auto max-w-7xl p-6">
       <div className="mb-6">
-        <h1 className="text-3xl font-bold">Relay Load Calculator V3.9.12</h1>
+        <h1 className="text-3xl font-bold">Relay Load Calculator V3.9.13</h1>
         <p className="text-slate-600">Quote loads before booking, then enter completed loads by driver for real P&L.</p>
       </div>
 
@@ -918,6 +964,7 @@ export default function Home() {
             updateStopAddress={updateStopAddress}
             updateRouteStopCount={updateRouteStopCount}
             updateRouteStopAddress={updateRouteStopAddress}
+            setRouteStopsText={setRouteStopsText}
             setReturnLoadEnabled={setReturnLoadEnabled}
           />
         </section>
@@ -940,6 +987,7 @@ export default function Home() {
             updateStopAddress={updateStopAddress}
             updateRouteStopCount={updateRouteStopCount}
             updateRouteStopAddress={updateRouteStopAddress}
+            setRouteStopsText={setRouteStopsText}
             setReturnLoadEnabled={setReturnLoadEnabled}
           />
           <div className="mb-6">
@@ -1290,6 +1338,7 @@ function QuoteOrLoadForm(props: {
   updateStopAddress: (kind: "origin" | "return", stopType: "pickup" | "delivery", index: number, value: string) => void;
   updateRouteStopCount: (kind: "origin" | "return", value: string) => void;
   updateRouteStopAddress: (kind: "origin" | "return", index: number, value: string) => void;
+  setRouteStopsText: (kind: "origin" | "return", value: string) => void;
   setReturnLoadEnabled: (enabled: boolean) => void;
 }) {
   const { input, result } = props;
@@ -1316,6 +1365,8 @@ function QuoteOrLoadForm(props: {
           deliveryLocations={input.originDeliveryLocations}
           routeStopCount={input.originRouteStopCount}
           routeStops={input.originRouteStops}
+          routeStopsText={input.originRouteStopsText}
+          onRouteStopsText={(v: string) => props.setRouteStopsText("origin", v)}
           onRouteStopCount={(v: string) => props.updateRouteStopCount("origin", v)}
           onRouteStopAddress={(index: number, v: string) => props.updateRouteStopAddress("origin", index, v)}
           onPickupCount={(v: string) => props.updateStopCount("origin", "pickup", v)}
@@ -1370,6 +1421,8 @@ function QuoteOrLoadForm(props: {
             deliveryLocations={input.returnDeliveryLocations}
             routeStopCount={input.returnRouteStopCount}
             routeStops={input.returnRouteStops}
+            routeStopsText={input.returnRouteStopsText}
+            onRouteStopsText={(v: string) => props.setRouteStopsText("return", v)}
             onRouteStopCount={(v: string) => props.updateRouteStopCount("return", v)}
             onRouteStopAddress={(index: number, v: string) => props.updateRouteStopAddress("return", index, v)}
             onPickupCount={(v: string) => props.updateStopCount("return", "pickup", v)}
@@ -1705,18 +1758,19 @@ function LoadCard(props: any) {
         <div className="rounded-2xl border bg-slate-50 p-4">
           <div className="mb-3 text-sm font-semibold">Ordered Route Stops</div>
           <p className="mb-4 text-sm text-slate-600">
-            Enter every stop exactly in the order the driver runs it. Stop 1 is the first pickup. Final stop is the final delivery.
+            Enter one stop per line, exactly in the order the driver runs it. First line is first pickup. Last line is final delivery.
           </p>
-          <NumberField label="# of Total Stops After Current Location" value={props.routeStopCount || 2} onChange={props.onRouteStopCount} />
-          <div className="mt-4 grid gap-4">
-            {(props.routeStops || ["", ""]).map((value: string, index: number) => (
-              <Field
-                key={`route-stop-${index}`}
-                label={`Stop ${index + 1} ${index === 0 ? "(First Pickup)" : index === (props.routeStops || []).length - 1 ? "(Final Delivery)" : ""} / ZIP`}
-                value={value}
-                onChange={(v: string) => props.onRouteStopAddress(index, v)}
-              />
-            ))}
+          <label className="block">
+            <span className="mb-2 flex min-h-[1.25rem] items-end text-sm font-semibold leading-tight">Stops After Current Location</span>
+            <textarea
+              value={props.routeStopsText || ""}
+              onChange={(e) => props.onRouteStopsText(e.target.value)}
+              className="h-48 w-full rounded-xl border p-3 font-mono text-sm"
+              placeholder={"44266\n44663\n44266\n15801\n44266\n43201"}
+            />
+          </label>
+          <div className="mt-3 text-sm text-slate-600">
+            Stops entered: {(props.routeStopsText || "").split(/\r?\n/).map((line: string) => line.trim()).filter(Boolean).length}
           </div>
         </div>
       </div>
