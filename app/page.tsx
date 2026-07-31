@@ -384,6 +384,17 @@ export default function Home() {
     return Number(data.miles || 0);
   }
 
+  async function routeMilesForOrderedStops(stops: string[]) {
+    const response = await fetch("/api/route-estimate", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ stops }),
+    });
+    const data = await response.json();
+    if (!response.ok) throw new Error(data.error || "Ordered route miles failed.");
+    return Number(data.miles || 0);
+  }
+
   async function fetchDrivers() {
     const response = await fetch("/api/drivers?include_inactive=true", { cache: "no-store" });
     const data = await response.json();
@@ -584,14 +595,10 @@ export default function Home() {
     }
 
     try {
-      setStatus(`Calculating ${kind} miles in exact entered order across ${cleanStops.length} stop(s)...`);
+      setStatus(`Calculating ${kind} miles as one ordered Google route with ${cleanStops.length} stop(s)...`);
 
       const deadheadMiles = await routeMiles(driverLocation, cleanStops[0]);
-      let loadedMiles = 0;
-
-      for (let i = 0; i < cleanStops.length - 1; i++) {
-        loadedMiles += await routeMiles(cleanStops[i], cleanStops[i + 1]);
-      }
+      const loadedMiles = await routeMilesForOrderedStops(cleanStops);
 
       setActiveInput((prev) =>
         kind === "origin"
@@ -599,7 +606,9 @@ export default function Home() {
           : { ...prev, returnDeadheadMiles: Number(deadheadMiles.toFixed(1)), returnLoadedMiles: Number(loadedMiles.toFixed(1)), returnStatus: prev.returnStatus === "none" ? "estimated" : prev.returnStatus }
       );
 
-      setStatus(`Calculated ${kind} miles in exact entered order.`);
+      setStatus(
+        `Calculated ${kind} miles in exact entered order. Deadhead: ${deadheadMiles.toFixed(1)} mi. Loaded: ${loadedMiles.toFixed(1)} mi.`
+      );
     } catch (error) {
       setStatus(error instanceof Error ? error.message : `Could not calculate ${kind} miles.`);
     }
@@ -865,7 +874,7 @@ export default function Home() {
   return (
     <main className="mx-auto max-w-7xl p-6">
       <div className="mb-6">
-        <h1 className="text-3xl font-bold">Relay Load Calculator V3.9.10</h1>
+        <h1 className="text-3xl font-bold">Relay Load Calculator V3.9.11</h1>
         <p className="text-slate-600">Quote loads before booking, then enter completed loads by driver for real P&L.</p>
       </div>
 
