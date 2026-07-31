@@ -28,38 +28,31 @@ async function getMiles(from: string, to: string, apiKey: string) {
   return (data?.routes?.[0]?.distanceMeters || 0) / 1609.344;
 }
 
-async function getOrderedStopMiles(stops: string[], apiKey: string) {
+async function getOrderedLegMiles(stops: string[], apiKey: string) {
   const cleanStops = stops.map((stop) => stop.trim()).filter(Boolean);
 
   if (cleanStops.length < 2) {
     throw new Error("At least two ordered stops are required.");
   }
 
-  const origin = cleanStops[0];
-  const destination = cleanStops[cleanStops.length - 1];
-  const intermediates = cleanStops.slice(1, -1).map((address) => ({ address }));
+  let totalMiles = 0;
+  const legs: { from: string; to: string; miles: number }[] = [];
 
-  const response = await fetch("https://routes.googleapis.com/directions/v2:computeRoutes", {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      "X-Goog-Api-Key": apiKey,
-      "X-Goog-FieldMask": "routes.distanceMeters,routes.duration",
-    },
-    body: JSON.stringify({
-      origin: { address: origin },
-      destination: { address: destination },
-      intermediates,
-      travelMode: "DRIVE",
-      routingPreference: "TRAFFIC_AWARE",
-      optimizeWaypointOrder: false,
-    }),
-  });
+  for (let i = 0; i < cleanStops.length - 1; i++) {
+    const from = cleanStops[i];
+    const to = cleanStops[i + 1];
+    const miles = await getMiles(from, to, apiKey);
+    const roundedMiles = Number(miles.toFixed(1));
+    totalMiles += miles;
+    legs.push({ from, to, miles: roundedMiles });
+  }
 
-  const data = await response.json();
-  if (!response.ok) throw new Error(data?.error?.message || "Google Routes API error.");
-
-  return (data?.routes?.[0]?.distanceMeters || 0) / 1609.344;
+  return {
+    miles: Number(totalMiles.toFixed(1)),
+    stopCount: cleanStops.length,
+    legCount: legs.length,
+    legs,
+  };
 }
 
 export async function POST(request: Request) {
@@ -70,11 +63,13 @@ export async function POST(request: Request) {
     if (!apiKey) return NextResponse.json({ error: "Missing GOOGLE_MAPS_API_KEY." }, { status: 400 });
 
     if (Array.isArray(body.stops) && body.stops.length >= 2) {
-      const miles = await getOrderedStopMiles(body.stops, apiKey);
+      const result = await getOrderedLegMiles(body.stops, apiKey);
       return NextResponse.json({
-        miles: Number(miles.toFixed(1)),
-        mode: "ordered-stops",
-        stopCount: body.stops.map((stop) => stop.trim()).filter(Boolean).length,
+        miles: result.miles,
+        mode: "ordered-leg-sum",
+        stopCount: result.stopCount,
+        legCount: result.legCount,
+        legs: result.legs,
       });
     }
 
