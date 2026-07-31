@@ -109,6 +109,8 @@ const baseDefaults: LoadInputs = {
   originDeliveryCount: 1,
   originPickupLocations: [""],
   originDeliveryLocations: [""],
+  originRouteStopCount: 2,
+  originRouteStops: ["", ""],
 
   returnDriverLocation: "",
   returnPickupLocation: "",
@@ -117,6 +119,8 @@ const baseDefaults: LoadInputs = {
   returnDeliveryCount: 1,
   returnPickupLocations: [""],
   returnDeliveryLocations: [""],
+  returnRouteStopCount: 2,
+  returnRouteStops: ["", ""],
 
   originActualRate: 0,
   originDriverRate: 0,
@@ -258,6 +262,8 @@ export default function Home() {
         returnDeliveryCount: 1,
         returnPickupLocations: [""],
         returnDeliveryLocations: [""],
+        returnRouteStopCount: 2,
+        returnRouteStops: ["", ""],
         returnActualRate: 0,
         returnDriverRate: 0,
         returnLoadedMiles: 0,
@@ -324,6 +330,46 @@ export default function Home() {
       const locations = [...prev.returnDeliveryLocations];
       locations[index] = value;
       return { ...prev, returnDeliveryLocations: locations, returnDeliveryLocation: locations[locations.length - 1] || "" };
+    });
+  }
+
+  function updateRouteStopCount(kind: "origin" | "return", value: string) {
+    const count = Math.max(2, Math.min(Number(value) || 2, 20));
+
+    setActiveInput((prev) => {
+      if (kind === "origin") {
+        return { ...prev, originRouteStopCount: count, originRouteStops: syncCount(prev.originRouteStops || ["", ""], count) };
+      }
+
+      return { ...prev, returnRouteStopCount: count, returnRouteStops: syncCount(prev.returnRouteStops || ["", ""], count) };
+    });
+  }
+
+  function updateRouteStopAddress(kind: "origin" | "return", index: number, value: string) {
+    setActiveInput((prev) => {
+      if (kind === "origin") {
+        const stops = [...(prev.originRouteStops || ["", ""])];
+        stops[index] = value;
+        return {
+          ...prev,
+          originRouteStops: stops,
+          originPickupLocation: stops[0] || "",
+          originDeliveryLocation: stops[stops.length - 1] || "",
+          originPickupLocations: stops.slice(0, 1),
+          originDeliveryLocations: stops.slice(1),
+        };
+      }
+
+      const stops = [...(prev.returnRouteStops || ["", ""])];
+      stops[index] = value;
+      return {
+        ...prev,
+        returnRouteStops: stops,
+        returnPickupLocation: stops[0] || "",
+        returnDeliveryLocation: stops[stops.length - 1] || "",
+        returnPickupLocations: stops.slice(0, 1),
+        returnDeliveryLocations: stops.slice(1),
+      };
     });
   }
 
@@ -441,16 +487,16 @@ export default function Home() {
       driver_type: input.driverType,
 
       origin_driver_location: input.originDriverLocation,
-      origin_pickup_location: input.originPickupLocation,
-      origin_delivery_location: input.originDeliveryLocations[input.originDeliveryLocations.length - 1] || input.originDeliveryLocation,
-      origin_pickup_locations: input.originPickupLocations,
-      origin_delivery_locations: input.originDeliveryLocations,
+      origin_pickup_location: (input.originRouteStops || [])[0] || input.originPickupLocation,
+      origin_delivery_location: (input.originRouteStops || [])[Math.max((input.originRouteStops || []).length - 1, 0)] || input.originDeliveryLocation,
+      origin_pickup_locations: (input.originRouteStops || []).slice(0, 1),
+      origin_delivery_locations: (input.originRouteStops || []).slice(1),
 
       return_driver_location: input.returnDriverLocation,
-      return_pickup_location: input.returnPickupLocation,
-      return_delivery_location: input.returnDeliveryLocations[input.returnDeliveryLocations.length - 1] || input.returnDeliveryLocation,
-      return_pickup_locations: input.returnPickupLocations,
-      return_delivery_locations: input.returnDeliveryLocations,
+      return_pickup_location: (input.returnRouteStops || [])[0] || input.returnPickupLocation,
+      return_delivery_location: (input.returnRouteStops || [])[Math.max((input.returnRouteStops || []).length - 1, 0)] || input.returnDeliveryLocation,
+      return_pickup_locations: (input.returnRouteStops || []).slice(0, 1),
+      return_delivery_locations: (input.returnRouteStops || []).slice(1),
 
       origin_actual_rate: input.originActualRate,
       origin_driver_rate: input.originDriverRate,
@@ -529,26 +575,22 @@ export default function Home() {
   async function calculateMiles(kind: "origin" | "return") {
     const input = activeInput;
     const driverLocation = kind === "origin" ? input.originDriverLocation : input.returnDriverLocation;
-    const pickups = kind === "origin" ? input.originPickupLocations : input.returnPickupLocations;
-    const deliveries = kind === "origin" ? input.originDeliveryLocations : input.returnDeliveryLocations;
+    const stops = kind === "origin" ? input.originRouteStops : input.returnRouteStops;
+    const cleanStops = (stops || []).map((x) => x.trim()).filter(Boolean);
 
-    const cleanPickups = pickups.map((x) => x.trim()).filter(Boolean);
-    const cleanDeliveries = deliveries.map((x) => x.trim()).filter(Boolean);
-
-    if (!driverLocation || cleanPickups.length === 0 || cleanDeliveries.length === 0) {
-      setStatus(`Enter current location, all pickups, and all deliveries for ${kind} load first.`);
+    if (!driverLocation || cleanStops.length < 2) {
+      setStatus(`Enter current location and at least two ordered stops for ${kind} load first.`);
       return;
     }
 
     try {
-      setStatus(`Calculating ${kind} miles through ${cleanPickups.length} pickup(s) and ${cleanDeliveries.length} delivery location(s)...`);
+      setStatus(`Calculating ${kind} miles in exact entered order across ${cleanStops.length} stop(s)...`);
 
-      const deadheadMiles = await routeMiles(driverLocation, cleanPickups[0]);
-      const stops = [...cleanPickups, ...cleanDeliveries];
+      const deadheadMiles = await routeMiles(driverLocation, cleanStops[0]);
       let loadedMiles = 0;
 
-      for (let i = 0; i < stops.length - 1; i++) {
-        loadedMiles += await routeMiles(stops[i], stops[i + 1]);
+      for (let i = 0; i < cleanStops.length - 1; i++) {
+        loadedMiles += await routeMiles(cleanStops[i], cleanStops[i + 1]);
       }
 
       setActiveInput((prev) =>
@@ -557,7 +599,7 @@ export default function Home() {
           : { ...prev, returnDeadheadMiles: Number(deadheadMiles.toFixed(1)), returnLoadedMiles: Number(loadedMiles.toFixed(1)), returnStatus: prev.returnStatus === "none" ? "estimated" : prev.returnStatus }
       );
 
-      setStatus(`Calculated ${kind} miles.`);
+      setStatus(`Calculated ${kind} miles in exact entered order.`);
     } catch (error) {
       setStatus(error instanceof Error ? error.message : `Could not calculate ${kind} miles.`);
     }
@@ -565,40 +607,53 @@ export default function Home() {
 
   async function calculateTolls(kind: "origin" | "return") {
     const input = activeInput;
-    const pickups = kind === "origin" ? input.originPickupLocations : input.returnPickupLocations;
-    const deliveries = kind === "origin" ? input.originDeliveryLocations : input.returnDeliveryLocations;
-    const cleanPickups = pickups.map((x) => x.trim()).filter(Boolean);
-    const cleanDeliveries = deliveries.map((x) => x.trim()).filter(Boolean);
-    const pickupLocation = cleanPickups[0];
-    const deliveryLocation = cleanDeliveries[cleanDeliveries.length - 1];
+    const stops = kind === "origin" ? input.originRouteStops : input.returnRouteStops;
+    const cleanStops = (stops || []).map((x) => x.trim()).filter(Boolean);
 
-    if (!pickupLocation || !deliveryLocation) {
-      setStatus(`Enter pickup and delivery for ${kind} load first.`);
+    if (cleanStops.length < 2) {
+      setStatus(`Enter at least two ordered stops for ${kind} tolls first.`);
       return;
     }
 
-    setStatus(`Calculating ${kind} tolls from first pickup to final delivery...`);
+    setStatus(`Calculating ${kind} tolls in exact entered order across ${cleanStops.length - 1} leg(s)...`);
 
-    const response = await fetch("/api/toll-estimate", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ from: pickupLocation, to: deliveryLocation }),
-    });
+    try {
+      let totalTolls = 0;
+      let totalFareCount = 0;
 
-    const data = await response.json();
+      for (let i = 0; i < cleanStops.length - 1; i++) {
+        const from = cleanStops[i];
+        const to = cleanStops[i + 1];
 
-    if (!response.ok) {
-      setStatus(`Tolls not ready: ${data.error}`);
-      return;
+        const response = await fetch("/api/toll-estimate", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ from, to }),
+        });
+
+        const data = await response.json();
+
+        if (!response.ok) {
+          setStatus(`Tolls failed on leg ${i + 1}: ${data.error}`);
+          return;
+        }
+
+        totalTolls += Number(data.tolls || 0);
+        totalFareCount += Number(data.fareCount || 0);
+      }
+
+      const roundedTolls = Number(totalTolls.toFixed(2));
+
+      setActiveInput((prev) =>
+        kind === "origin"
+          ? { ...prev, originTolls: roundedTolls }
+          : { ...prev, returnTolls: roundedTolls, returnStatus: prev.returnStatus === "none" ? "estimated" : prev.returnStatus }
+      );
+
+      setStatus(`Calculated ${kind} tolls in exact entered order: $${roundedTolls.toFixed(2)} across ${cleanStops.length - 1} leg(s). ${totalFareCount} fare(s).`);
+    } catch (error) {
+      setStatus(error instanceof Error ? error.message : `Could not calculate ${kind} tolls.`);
     }
-
-    setActiveInput((prev) =>
-      kind === "origin"
-        ? { ...prev, originTolls: Number(data.tolls || 0) }
-        : { ...prev, returnTolls: Number(data.tolls || 0), returnStatus: prev.returnStatus === "none" ? "estimated" : prev.returnStatus }
-    );
-
-    setStatus(data.message || `Calculated ${kind} tolls.`);
   }
 
   async function refreshDiesel(kind: "origin" | "return") {
@@ -810,7 +865,7 @@ export default function Home() {
   return (
     <main className="mx-auto max-w-7xl p-6">
       <div className="mb-6">
-        <h1 className="text-3xl font-bold">Relay Load Calculator V3.9.7</h1>
+        <h1 className="text-3xl font-bold">Relay Load Calculator V3.9.10</h1>
         <p className="text-slate-600">Quote loads before booking, then enter completed loads by driver for real P&L.</p>
       </div>
 
@@ -847,6 +902,8 @@ export default function Home() {
             refreshDiesel={refreshDiesel}
             updateStopCount={updateStopCount}
             updateStopAddress={updateStopAddress}
+            updateRouteStopCount={updateRouteStopCount}
+            updateRouteStopAddress={updateRouteStopAddress}
             setReturnLoadEnabled={setReturnLoadEnabled}
           />
         </section>
@@ -867,6 +924,8 @@ export default function Home() {
             refreshDiesel={refreshDiesel}
             updateStopCount={updateStopCount}
             updateStopAddress={updateStopAddress}
+            updateRouteStopCount={updateRouteStopCount}
+            updateRouteStopAddress={updateRouteStopAddress}
             setReturnLoadEnabled={setReturnLoadEnabled}
           />
           <div className="mb-6">
@@ -1215,6 +1274,8 @@ function QuoteOrLoadForm(props: {
   refreshDiesel: (kind: "origin" | "return") => void;
   updateStopCount: (kind: "origin" | "return", stopType: "pickup" | "delivery", value: string) => void;
   updateStopAddress: (kind: "origin" | "return", stopType: "pickup" | "delivery", index: number, value: string) => void;
+  updateRouteStopCount: (kind: "origin" | "return", value: string) => void;
+  updateRouteStopAddress: (kind: "origin" | "return", index: number, value: string) => void;
   setReturnLoadEnabled: (enabled: boolean) => void;
 }) {
   const { input, result } = props;
@@ -1239,6 +1300,10 @@ function QuoteOrLoadForm(props: {
           deliveryCount={input.originDeliveryCount}
           pickupLocations={input.originPickupLocations}
           deliveryLocations={input.originDeliveryLocations}
+          routeStopCount={input.originRouteStopCount}
+          routeStops={input.originRouteStops}
+          onRouteStopCount={(v: string) => props.updateRouteStopCount("origin", v)}
+          onRouteStopAddress={(index: number, v: string) => props.updateRouteStopAddress("origin", index, v)}
           onPickupCount={(v: string) => props.updateStopCount("origin", "pickup", v)}
           onDeliveryCount={(v: string) => props.updateStopCount("origin", "delivery", v)}
           onPickupAddress={(index: number, v: string) => props.updateStopAddress("origin", "pickup", index, v)}
@@ -1289,6 +1354,10 @@ function QuoteOrLoadForm(props: {
             deliveryCount={input.returnDeliveryCount}
             pickupLocations={input.returnPickupLocations}
             deliveryLocations={input.returnDeliveryLocations}
+            routeStopCount={input.returnRouteStopCount}
+            routeStops={input.returnRouteStops}
+            onRouteStopCount={(v: string) => props.updateRouteStopCount("return", v)}
+            onRouteStopAddress={(index: number, v: string) => props.updateRouteStopAddress("return", index, v)}
             onPickupCount={(v: string) => props.updateStopCount("return", "pickup", v)}
             onDeliveryCount={(v: string) => props.updateStopCount("return", "delivery", v)}
             onPickupAddress={(index: number, v: string) => props.updateStopAddress("return", "pickup", index, v)}
@@ -1533,7 +1602,7 @@ function buildReport(loads: SavedLoad[], repairs: Repair[], costs: ActualCost[])
     const keys = [repair.repair_date, weekKeySunday(repair.repair_date), monthKey(repair.repair_date)];
     [daily, weekly, monthly].forEach((group, index) => {
       const key = keys[index];
-      group[key] ||= makeBlank();
+      if (!group[key]) return;
       group[key].actualRepairs += Number(repair.amount || 0);
     });
   }
@@ -1542,7 +1611,7 @@ function buildReport(loads: SavedLoad[], repairs: Repair[], costs: ActualCost[])
     const keys = [cost.cost_date, weekKeySunday(cost.cost_date), monthKey(cost.cost_date)];
     [daily, weekly, monthly].forEach((group, index) => {
       const key = keys[index];
-      group[key] ||= makeBlank();
+      if (!group[key]) return;
 
       if (cost.cost_type === "diesel") {
         if (!treatAsOwnerOperator) group[key].actualDiesel += Number(cost.amount || 0);
@@ -1619,21 +1688,22 @@ function LoadCard(props: any) {
       <div className="grid gap-5">
         <Field label="Current Location / ZIP" value={props.current} onChange={props.onCurrent} />
 
-        <div className="grid gap-5 md:grid-cols-2">
-          <NumberField label="# of Pickup Locations" value={props.pickupCount || 1} onChange={props.onPickupCount} />
-          <NumberField label="# of Delivery Locations" value={props.deliveryCount || 1} onChange={props.onDeliveryCount} />
-        </div>
-
-        <div className="grid gap-4">
-          {(props.pickupLocations || [""]).map((value: string, index: number) => (
-            <Field key={`pickup-${index}`} label={`Pickup Location ${index + 1} / ZIP`} value={value} onChange={(v: string) => props.onPickupAddress(index, v)} />
-          ))}
-        </div>
-
-        <div className="grid gap-4">
-          {(props.deliveryLocations || [""]).map((value: string, index: number) => (
-            <Field key={`delivery-${index}`} label={`Delivery Location ${index + 1} / ZIP`} value={value} onChange={(v: string) => props.onDeliveryAddress(index, v)} />
-          ))}
+        <div className="rounded-2xl border bg-slate-50 p-4">
+          <div className="mb-3 text-sm font-semibold">Ordered Route Stops</div>
+          <p className="mb-4 text-sm text-slate-600">
+            Enter every stop exactly in the order the driver runs it. Stop 1 is the first pickup. Final stop is the final delivery.
+          </p>
+          <NumberField label="# of Total Stops After Current Location" value={props.routeStopCount || 2} onChange={props.onRouteStopCount} />
+          <div className="mt-4 grid gap-4">
+            {(props.routeStops || ["", ""]).map((value: string, index: number) => (
+              <Field
+                key={`route-stop-${index}`}
+                label={`Stop ${index + 1} ${index === 0 ? "(First Pickup)" : index === (props.routeStops || []).length - 1 ? "(Final Delivery)" : ""} / ZIP`}
+                value={value}
+                onChange={(v: string) => props.onRouteStopAddress(index, v)}
+              />
+            ))}
+          </div>
         </div>
       </div>
       <div className="mt-6 grid gap-5 md:grid-cols-2">
